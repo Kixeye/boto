@@ -823,6 +823,12 @@ class ItemTestCase(unittest.TestCase):
         self.assertFalse(self.create_item({}))
 
 
+class ItemFromItemTestCase(ItemTestCase):
+    def setUp(self):
+        super(ItemFromItemTestCase, self).setUp()
+        self.johndoe = self.create_item(self.johndoe)
+
+
 def fake_results(name, greeting='hello', exclusive_start_key=None, limit=None):
     if exclusive_start_key is None:
         exclusive_start_key = -1
@@ -1123,6 +1129,13 @@ class BatchGetResultSetTestCase(unittest.TestCase):
 
         # Make sure we won't check for results in the future.
         self.assertFalse(self.results._results_left)
+
+    def test_fetch_more_empty(self):
+        self.results.to_call(lambda keys: {'results': [], 'last_key': None}) 
+
+        self.results.fetch_more()
+        self.assertEqual(self.results._results, [])
+        self.assertRaises(StopIteration, self.results.next)
 
     def test_iteration(self):
         # First page.
@@ -2662,6 +2675,33 @@ class TableTestCase(unittest.TestCase):
         self.assertEqual(False, mock_query.call_args[1]['scan_index_forward'])
         self.assertIn('limit', mock_query.call_args[1])
         self.assertEqual(10, mock_query.call_args[1]['limit'])
+
+    def test_query_count_paginated(self):
+        def return_side_effect(*args, **kwargs):
+            if kwargs.get('exclusive_start_key'):
+                return {'Count': 10, 'LastEvaluatedKey': None}
+            else:
+                return {
+                    'Count': 20,
+                    'LastEvaluatedKey': {
+                        'username': {
+                            'S': 'johndoe'
+                        },
+                        'date_joined': {
+                            'N': '4118642633'
+                        }
+                    }
+                }
+
+        with mock.patch.object(
+                self.users.connection,
+                'query',
+                side_effect=return_side_effect
+        ) as mock_query:
+            count = self.users.query_count(username__eq='johndoe')
+            self.assertTrue(isinstance(count, int))
+            self.assertEqual(30, count)
+            self.assertEqual(mock_query.call_count, 2)
 
     def test_private_batch_get(self):
         expected = {
